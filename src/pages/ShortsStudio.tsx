@@ -161,6 +161,59 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     return lines;
 }
 
+function createPlaceholderSceneImage(scene: Pick<StoryboardScene, 'id' | 'onScreenText' | 'visual'>, style: string) {
+    const width = 720;
+    const height = 1280;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    const base = style.toLowerCase().includes('anime') ? '#111827' : '#0b1220';
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, width, height);
+
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, 'rgba(99,102,241,0.55)');
+    grad.addColorStop(1, 'rgba(236,72,153,0.35)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(40, 80, width - 80, height - 160);
+
+    const header = `Scene ${scene.id}`;
+    const title = (scene.onScreenText || '').trim();
+    const desc = (scene.visual || '').trim();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Outfit, sans-serif';
+    ctx.fillText(header, 70, 150);
+
+    ctx.font = 'bold 56px Outfit, sans-serif';
+    const titleLines = title ? wrapText(ctx, title, width - 140) : [];
+    let y = 240;
+    for (const line of titleLines.slice(0, 4)) {
+        ctx.fillText(line, 70, y);
+        y += 72;
+    }
+
+    if (desc) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '28px Outfit, sans-serif';
+        const descLines = wrapText(ctx, desc, width - 140);
+        y += 20;
+        for (const line of descLines.slice(0, 8)) {
+            ctx.fillText(line, 70, y);
+            y += 40;
+        }
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+}
+
 async function createWebmVideo(storyboard: Storyboard, imagesById: Map<number, string>, audioUrl: string | null) {
     if (typeof MediaRecorder === 'undefined') throw new Error('المتصفح لا يدعم تسجيل الفيديو (MediaRecorder). جرّب Chrome/Edge.');
     const mimeType = pickMediaRecorderMimeType();
@@ -391,14 +444,24 @@ export default function ShortsStudio() {
         try {
             const next: { id: number; dataUrl: string }[] = [];
             const style = storyboard.style || 'cartoon';
+            let usedFallback = false;
             for (const scene of storyboard.scenes.slice(0, 12)) {
                 const prompt = scene.imagePrompt.trim()
                     ? scene.imagePrompt
                     : `${style} vertical 9:16, clean background, cartoon still frame, scene: ${scene.visual}, on-screen text: ${scene.onScreenText}`;
-                const dataUrl = await generateImageGemini(prompt, '9:16');
+                let dataUrl = '';
+                try {
+                    dataUrl = await generateImageGemini(prompt, '9:16');
+                } catch {
+                    usedFallback = true;
+                    dataUrl = createPlaceholderSceneImage(scene, style);
+                }
                 next.push({ id: scene.id, dataUrl });
             }
             setSceneImages(next);
+            if (usedFallback) {
+                setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'تعذر توليد صور عبر Gemini/Imagen لهذا المفتاح. تم استخدام صور بديلة محلية داخل المتصفح.' }]);
+            }
         } catch (e: unknown) {
             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `تعذر توليد الصور: ${getErrorMessage(e)}` }]);
         } finally {
@@ -436,13 +499,19 @@ export default function ShortsStudio() {
 
             const nextImages: { id: number; dataUrl: string }[] = [];
             const style = storyboard.style || 'cartoon';
+            let usedFallback = false;
             for (const scene of storyboard.scenes.slice(0, 12)) {
                 let dataUrl = imagesById.get(scene.id);
                 if (!dataUrl) {
                     const prompt = scene.imagePrompt.trim()
                         ? scene.imagePrompt
                         : `${style} vertical 9:16, clean background, cartoon still frame, scene: ${scene.visual}, on-screen text: ${scene.onScreenText}`;
-                    dataUrl = await generateImageGemini(prompt, '9:16');
+                    try {
+                        dataUrl = await generateImageGemini(prompt, '9:16');
+                    } catch {
+                        usedFallback = true;
+                        dataUrl = createPlaceholderSceneImage(scene, style);
+                    }
                     imagesById.set(scene.id, dataUrl);
                 }
                 nextImages.push({ id: scene.id, dataUrl });
@@ -460,7 +529,11 @@ export default function ShortsStudio() {
             const blob = await createWebmVideo(storyboard, imagesById, audioUrl);
             const url = URL.createObjectURL(blob);
             setVideoUrl(url);
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: audioUrl ? 'تم إنشاء الفيديو (مع صوت). يمكنك تشغيله وتنزيله.' : 'تم إنشاء الفيديو (بدون صوت). أضف مفتاح ElevenLabs من الإعدادات للحصول على تعليق صوتي.' }]);
+            const baseMsg = audioUrl
+                ? 'تم إنشاء الفيديو (مع صوت). يمكنك تشغيله وتنزيله.'
+                : 'تم إنشاء الفيديو (بدون صوت). أضف مفتاح ElevenLabs من الإعدادات للحصول على تعليق صوتي.';
+            const extra = usedFallback ? '\n\nملاحظة: تم استخدام صور بديلة محلية لأن توليد الصور عبر Gemini/Imagen غير متاح لهذا المفتاح.' : '';
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: baseMsg + extra }]);
         } catch (e: unknown) {
             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `فشل إنشاء الفيديو: ${getErrorMessage(e)}` }]);
         } finally {
