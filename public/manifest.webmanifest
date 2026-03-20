@@ -1,0 +1,17 @@
+{
+  "name": "مساحة الذكاء الاصطناعي",
+  "short_name": "AI Space",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./vite.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
+

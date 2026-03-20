@@ -575,13 +575,6 @@ export default function ShortsStudio() {
                     <Download size={18} /> تنزيل الفيديو
                 </button>
             </div>
-
-            {videoUrl && (
-                <div className="glass-panel" style={{ padding: '12px', maxWidth: '520px' }}>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '8px' }}>معاينة الفيديو</div>
-                    <video src={videoUrl} controls style={{ width: '100%', borderRadius: '10px', border: '1px solid var(--glass-border)' }} />
-                </div>
-            )}
         </div>
     );
 
@@ -598,6 +591,48 @@ export default function ShortsStudio() {
                 placeholder="اكتب موضوع الفيديو المطلوب..."
                 customActions={customActions}
             />
+
+            {(isGeneratingVideo || videoUrl) && (
+                <div style={{ position: 'fixed', bottom: sceneImages.length > 0 ? '360px' : '120px', left: '20px', right: '20px', pointerEvents: 'none' }}>
+                    <div className="glass-panel" style={{ padding: '12px', pointerEvents: 'auto', maxWidth: '720px', margin: '0 auto', display: 'grid', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                            <div style={{ fontWeight: 700 }}>فيديو الشورتس</div>
+                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                <a
+                                    className="btn btn-outline"
+                                    href={videoUrl || undefined}
+                                    download="shorts-video.webm"
+                                    style={{ pointerEvents: videoUrl ? 'auto' : 'none', opacity: videoUrl ? 1 : 0.5 }}
+                                >
+                                    <Download size={18} /> تنزيل
+                                </a>
+                                <button
+                                    className="btn btn-outline"
+                                    onClick={() => { if (videoUrl) window.open(videoUrl, '_blank'); }}
+                                    disabled={!videoUrl}
+                                >
+                                    فتح
+                                </button>
+                            </div>
+                        </div>
+
+                        {!videoUrl && isGeneratingVideo && (
+                            <div style={{ color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                                جاري إنشاء الفيديو… قد يستغرق ذلك حوالي 60 ثانية لأن المتصفح يسجل الفيديو فعلياً.
+                            </div>
+                        )}
+
+                        {videoUrl && (
+                            <video
+                                src={videoUrl}
+                                controls
+                                playsInline
+                                style={{ width: '100%', borderRadius: '10px', border: '1px solid var(--glass-border)' }}
+                            />
+                        )}
+                    </div>
+                </div>
+            )}
 
             {(sceneImages.length > 0) && (
                 <div style={{ position: 'fixed', bottom: '120px', left: '20px', right: '20px', pointerEvents: 'none' }}>
