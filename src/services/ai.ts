@@ -159,21 +159,48 @@ export async function generateImageOpenAI(prompt: string, aspectRatio: '1:1' | '
  */
 export async function generateImageGemini(prompt: string, aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9' = '1:1'): Promise<string> {
     const gemini = createGeminiClient();
-    const response = await gemini.models.generateImages({
-        model: 'imagen-3.0-generate-002',
-        prompt: prompt,
-        config: {
-            numberOfImages: 1,
-            aspectRatio: aspectRatio,
-            outputMimeType: 'image/jpeg',
-        },
-    });
+    const modelCandidates = [
+        'imagen-3.0-generate-002',
+        'imagen-3.0-generate-001',
+        'imagen-3.0-fast-generate-001',
+        'imagen-2.0-generate-001',
+    ];
 
-    // Gemini returns base64 string
-    const base64Image = response.generatedImages?.[0]?.image?.imageBytes;
-    if (!base64Image) throw new Error("Failed to generate image with Gemini");
+    let lastError: unknown = null;
+    for (const model of modelCandidates) {
+        try {
+            const response = await gemini.models.generateImages({
+                model,
+                prompt: prompt,
+                config: {
+                    numberOfImages: 1,
+                    aspectRatio: aspectRatio,
+                    outputMimeType: 'image/jpeg',
+                },
+            });
 
-    return `data:image/jpeg;base64,${base64Image}`;
+            const base64Image = response.generatedImages?.[0]?.image?.imageBytes;
+            if (!base64Image) throw new Error('Failed to generate image with Gemini');
+            return `data:image/jpeg;base64,${base64Image}`;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    const mapToOpenAIAspect = (ar: typeof aspectRatio): '1:1' | '9:16' | '16:9' => {
+        if (ar === '9:16') return '9:16';
+        if (ar === '16:9') return '16:9';
+        if (ar === '3:4') return '9:16';
+        if (ar === '4:3') return '16:9';
+        return '1:1';
+    };
+
+    const openaiKey = getOpenAIKey();
+    if (openaiKey) {
+        return generateImageOpenAI(prompt, mapToOpenAIAspect(aspectRatio));
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Failed to generate image');
 }
 
 /**
