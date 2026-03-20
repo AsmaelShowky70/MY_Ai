@@ -207,7 +207,7 @@ async function createWebmVideo(storyboard: Storyboard, imagesById: Map<number, s
     const recorder = new MediaRecorder(stream, { mimeType });
     recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
-    const duration = 60;
+    const duration = Math.max(1, Math.min(120, Number.isFinite(storyboard.durationSeconds) ? storyboard.durationSeconds : 60));
     const startMs = performance.now();
 
     const draw = (now: number) => {

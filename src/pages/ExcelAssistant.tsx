@@ -7,17 +7,19 @@ import * as XLSX from 'xlsx';
 
 type ChatMessage = { id: string; role: 'user' | 'ai'; content: string };
 
-const SYSTEM_PROMPT = `أنت مساعد خبير في Microsoft Excel وGoogle Sheets.
+const SYSTEM_PROMPT = `أنت مساعد خبير في Microsoft Excel وGoogle Sheets داخل تطبيق ويب قادر على إنشاء وتعديل ملفات Excel فعلياً.
 
 مهامك:
 - حل مشاكل الإكسيل (صيغ، Pivot, تنظيف بيانات، تنسيق، منطق)
 - فهم تقارير/جداول وتحويلها إلى ملخصات وخطوات عملية
+- عند طلب المستخدم "إنشاء ملف من الصفر" قدّم له هيكل ملف واضح (أوراق/أعمدة/صيغ) وخطة جاهزة للتطبيق (بدون أعذار).
 
 قواعد:
 1) اكتب بالعربية الفصحى المهنية.
 2) إذا طُلبت صيغة، قدّم الصيغة جاهزة واذكر أين توضع مع مثال.
 3) إذا كان لدى المستخدم ملف Excel مرفوع، استخدم ملخص بنية الملف (الأوراق/العناوين/عينة بيانات) لتقديم حلول دقيقة.
-4) لا تختلق أرقاماً غير موجودة في الملف.`;
+4) لا تقل "أنا نموذج لغوي" ولا تقل أنك لا تستطيع إنشاء ملفات. بدلاً من ذلك أعطِ نتيجة قابلة للتنفيذ.
+5) لا تختلق أرقاماً غير موجودة في الملف.`;
 
 const EDIT_PLAN_SYSTEM_PROMPT = `أعد JSON صالح فقط دون أي نص إضافي.
 
@@ -36,6 +38,33 @@ const EDIT_PLAN_SYSTEM_PROMPT = `أعد JSON صالح فقط دون أي نص إ
 - استخدم أسماء أوراق موجودة قدر الإمكان.
 - لا تستخدم عمليات حذف/تعديل صفوف معقدة. إذا لزم، اقترحها في notes بدل actions.
 - يجب أن تكون العناوين مثل A1 و B2 صالحة.`;
+
+function isCreateFileRequest(text: string) {
+    const t = text.toLowerCase();
+    return (
+        t.includes('انشئ ملف') ||
+        t.includes('إنشئ ملف') ||
+        t.includes('إنشاء ملف') ||
+        t.includes('اعمل ملف') ||
+        t.includes('اعمل جدول') ||
+        t.includes('create excel') ||
+        t.includes('create xlsx') ||
+        t.includes('new excel')
+    );
+}
+
+function isApplyEditsRequest(text: string) {
+    const t = text.toLowerCase();
+    return (
+        t.includes('طبق') ||
+        t.includes('تطبيق') ||
+        t.includes('عدّل') ||
+        t.includes('عدل') ||
+        t.includes('تعديل') ||
+        t.includes('add column') ||
+        t.includes('update file')
+    );
+}
 
 function buildPrompt(history: ChatMessage[], nextUserInput: string) {
     const recent = history.slice(-10);
@@ -208,6 +237,19 @@ export default function ExcelAssistant() {
 
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
         setInput('');
+        const shouldCreate = !workbook && isCreateFileRequest(text);
+        const shouldApply = !!workbook && isApplyEditsRequest(text);
+
+        if (shouldCreate) {
+            await handleCreateNewFile(text);
+            return;
+        }
+
+        if (shouldApply) {
+            await handleApplyEdits(text);
+            return;
+        }
+
         setIsLoading(true);
 
         try {
@@ -222,12 +264,13 @@ export default function ExcelAssistant() {
         }
     };
 
-    const handleApplyEdits = async () => {
-        if (!workbook) {
+    const handleApplyEdits = async (requestOverride?: string) => {
+        const wb = workbook;
+        if (!wb) {
             alert('ارفع ملف Excel أولاً.');
             return;
         }
-        const request = input.trim() || lastUserText;
+        const request = (requestOverride || input.trim() || lastUserText).trim();
         if (!request) {
             alert('اكتب التعديل المطلوب أولاً.');
             return;
@@ -236,13 +279,13 @@ export default function ExcelAssistant() {
         setIsLoading(true);
         setModifiedBuffer(null);
         try {
-            const summary = workbookSummary(workbook);
+            const summary = workbookSummary(wb);
             const prompt = `طلب المستخدم:\n${request}\n\nملخص الملف:\n${summary}\n\nأعد خطة تعديلات JSON قابلة للتطبيق.`;
             const raw = await generateJsonText(prompt, EDIT_PLAN_SYSTEM_PROMPT);
             const parsed = JSON.parse(raw) as { notes?: string; actions?: EditAction[] };
             const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
 
-            const cloned = XLSX.read(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }), { type: 'array' });
+            const cloned = XLSX.read(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), { type: 'array' });
             applyEditPlan(cloned, actions);
             const out = XLSX.write(cloned, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
             setModifiedBuffer(out);
@@ -257,8 +300,8 @@ export default function ExcelAssistant() {
         }
     };
 
-    const handleCreateNewFile = async () => {
-        const request = input.trim() || lastUserText;
+    const handleCreateNewFile = async (requestOverride?: string) => {
+        const request = (requestOverride || input.trim() || lastUserText).trim();
         if (!request) {
             alert('اكتب وصف الملف الذي تريد إنشاءه أولاً. مثال: "ملف حضور وانصراف به أعمدة (اسم، تاريخ، وقت دخول، وقت خروج)".');
             return;
@@ -321,11 +364,11 @@ export default function ExcelAssistant() {
                 <FileSpreadsheet size={18} /> رفع ملف Excel
             </button>
 
-            <button className="btn btn-outline" onClick={handleCreateNewFile} disabled={isLoading}>
+            <button className="btn btn-outline" onClick={() => void handleCreateNewFile()} disabled={isLoading}>
                 <Plus size={18} /> إنشاء ملف جديد
             </button>
 
-            <button className="btn btn-outline" onClick={handleApplyEdits} disabled={isLoading || !workbook}>
+            <button className="btn btn-outline" onClick={() => void handleApplyEdits()} disabled={isLoading || !workbook}>
                 <Wand2 size={18} /> تطبيق تعديل على الملف
             </button>
 
