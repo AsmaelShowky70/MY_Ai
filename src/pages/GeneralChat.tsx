@@ -75,7 +75,6 @@ export default function GeneralChat() {
             onClick={handleClear}
             className="btn btn-outline"
             style={{ color: '#ef4444', borderColor: '#ef4444' }}
-            disabled={messages.length <= 1}
         >
             <Trash2 size={18} /> بدء محادثة جديدة
         </button>

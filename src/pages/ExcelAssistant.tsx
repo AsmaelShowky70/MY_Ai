@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ChatLayout from '../components/ChatLayout';
 import { generateJsonText, generateText } from '../services/ai';
-import { Download, FileSpreadsheet, Trash2, Wand2 } from 'lucide-react';
+import { Download, FileSpreadsheet, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import * as XLSX from 'xlsx';
 
@@ -246,11 +246,44 @@ export default function ExcelAssistant() {
             applyEditPlan(cloned, actions);
             const out = XLSX.write(cloned, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
             setModifiedBuffer(out);
+            setWorkbook(cloned);
 
             const notes = typeof parsed.notes === 'string' && parsed.notes.trim() ? parsed.notes.trim() : 'تم تطبيق خطة التعديلات على الملف.';
             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `${notes}\n\nعدد الإجراءات المطبقة: ${actions.length}` }]);
         } catch (e: unknown) {
             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `تعذر التطبيق: ${getErrorMessage(e)}` }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleCreateNewFile = async () => {
+        const request = input.trim() || lastUserText;
+        if (!request) {
+            alert('اكتب وصف الملف الذي تريد إنشاءه أولاً. مثال: "ملف حضور وانصراف به أعمدة (اسم، تاريخ، وقت دخول، وقت خروج)".');
+            return;
+        }
+
+        setIsLoading(true);
+        setModifiedBuffer(null);
+        try {
+            const prompt = `المطلوب: إنشاء ملف Excel من الصفر.\n\nوصف المستخدم:\n${request}\n\nأعد خطة JSON لإنشاء الأوراق والعناوين والصيغ الأساسية إن لزم.`;
+            const raw = await generateJsonText(prompt, EDIT_PLAN_SYSTEM_PROMPT);
+            const parsed = JSON.parse(raw) as { notes?: string; actions?: EditAction[] };
+            const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+
+            const wb = XLSX.utils.book_new();
+            applyEditPlan(wb, actions);
+            const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+            setWorkbook(wb);
+            setFileName('new.xlsx');
+            setModifiedBuffer(out);
+
+            const notes = typeof parsed.notes === 'string' && parsed.notes.trim() ? parsed.notes.trim() : 'تم إنشاء ملف جديد.';
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `${notes}\n\nيمكنك الآن تنزيل الملف أو طلب تعديل إضافي.` }]);
+        } catch (e: unknown) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `تعذر إنشاء الملف: ${getErrorMessage(e)}` }]);
         } finally {
             setIsLoading(false);
         }
@@ -288,6 +321,10 @@ export default function ExcelAssistant() {
                 <FileSpreadsheet size={18} /> رفع ملف Excel
             </button>
 
+            <button className="btn btn-outline" onClick={handleCreateNewFile} disabled={isLoading}>
+                <Plus size={18} /> إنشاء ملف جديد
+            </button>
+
             <button className="btn btn-outline" onClick={handleApplyEdits} disabled={isLoading || !workbook}>
                 <Wand2 size={18} /> تطبيق تعديل على الملف
             </button>
@@ -304,7 +341,6 @@ export default function ExcelAssistant() {
                 onClick={handleClear}
                 className="btn btn-outline"
                 style={{ color: '#ef4444', borderColor: '#ef4444' }}
-                disabled={messages.length <= 1}
             >
                 <Trash2 size={18} /> بدء محادثة جديدة
             </button>

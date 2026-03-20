@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, User } from 'lucide-react';
 
 interface ChatMessage {
@@ -19,10 +19,95 @@ interface ChatLayoutProps {
     customActions?: React.ReactNode;
 }
 
+type Block =
+    | { type: 'p'; text: string }
+    | { type: 'h3'; text: string }
+    | { type: 'ul'; items: string[] }
+    | { type: 'code'; code: string };
+
+function splitInlineCode(text: string) {
+    const parts = text.split('`');
+    const nodes: React.ReactNode[] = [];
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+        if (i % 2 === 1) nodes.push(<code key={i}>{part}</code>);
+        else nodes.push(<React.Fragment key={i}>{part}</React.Fragment>);
+    }
+    return nodes.length ? nodes : text;
+}
+
+function parseBlocks(content: string): Block[] {
+    const lines = content.replace(/\r\n/g, '\n').split('\n');
+    const blocks: Block[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i] ?? '';
+
+        if (line.trim().startsWith('```')) {
+            i++;
+            const codeLines: string[] = [];
+            while (i < lines.length && !(lines[i] ?? '').trim().startsWith('```')) {
+                codeLines.push(lines[i] ?? '');
+                i++;
+            }
+            if (i < lines.length) i++;
+            blocks.push({ type: 'code', code: codeLines.join('\n') });
+            continue;
+        }
+
+        const headingMatch = line.match(/^#{1,3}\s+(.*)$/);
+        if (headingMatch) {
+            blocks.push({ type: 'h3', text: headingMatch[1].trim() });
+            i++;
+            continue;
+        }
+
+        const isBullet = (v: string) => /^[-*]\s+/.test(v.trim());
+        if (isBullet(line)) {
+            const items: string[] = [];
+            while (i < lines.length && isBullet(lines[i] ?? '')) {
+                const raw = (lines[i] ?? '').trim().replace(/^[-*]\s+/, '');
+                if (raw) items.push(raw);
+                i++;
+            }
+            if (items.length) blocks.push({ type: 'ul', items });
+            continue;
+        }
+
+        if (!line.trim()) {
+            i++;
+            continue;
+        }
+
+        const paraLines: string[] = [];
+        while (i < lines.length && (lines[i] ?? '').trim() && !(lines[i] ?? '').trim().startsWith('```') && !isBullet(lines[i] ?? '') && !/^#{1,3}\s+/.test((lines[i] ?? ''))) {
+            paraLines.push(lines[i] ?? '');
+            i++;
+        }
+        const text = paraLines.join('\n').trim();
+        if (text) blocks.push({ type: 'p', text });
+    }
+
+    return blocks;
+}
+
+function renderMarkdownLike(content: string) {
+    const blocks = parseBlocks(content);
+    return blocks.map((b, idx) => {
+        if (b.type === 'h3') return <h3 key={idx}>{b.text}</h3>;
+        if (b.type === 'ul') return <ul key={idx}>{b.items.map((it, i) => <li key={i}>{splitInlineCode(it)}</li>)}</ul>;
+        if (b.type === 'code') return <pre key={idx}><code>{b.code}</code></pre>;
+        return <p key={idx}>{splitInlineCode(b.text)}</p>;
+    });
+}
+
 export default function ChatLayout({
     title, subtitle, messages, input, setInput, onSend, isLoading, placeholder = "Type your message...", customActions
 }: ChatLayoutProps) {
     const bottomRef = useRef<HTMLDivElement>(null);
+    const rendered = useMemo(() => messages.map(m => ({ ...m, rendered: renderMarkdownLike(m.content) })), [messages]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,14 +139,13 @@ export default function ChatLayout({
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {messages.map((msg) => (
+                    {rendered.map((msg) => (
                         <div key={msg.id} className={`chat-message ${msg.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
                             <div className="chat-avatar">
                                 {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
                             </div>
-                            <div className="chat-bubble markdown-wrapper" style={{ whiteSpace: 'pre-wrap' }}>
-                                {/* For real markdown we'd use react-markdown, wait, maybe simple pre-wrap is ok, or we can dangerouslySetInnerHTML if we parse it, but for safety simple pre-wrap is good enough unless we add marked.js */}
-                                {msg.content}
+                            <div className="chat-bubble markdown-wrapper">
+                                {msg.rendered}
                             </div>
                         </div>
                     ))}
