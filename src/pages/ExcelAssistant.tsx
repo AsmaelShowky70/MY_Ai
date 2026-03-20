@@ -179,14 +179,34 @@ function applyEditPlan(workbook: XLSX.WorkBook, actions: EditAction[]) {
     }
 }
 
-function downloadArrayBuffer(filename: string, buffer: ArrayBuffer) {
+async function downloadArrayBuffer(filename: string, buffer: ArrayBuffer) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = new File([blob], filename, { type: blob.type });
+
+    const nav = navigator as unknown as {
+        canShare?: (data?: unknown) => boolean;
+        share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+    };
+
+    try {
+        const shareData = { files: [file], title: filename };
+        if (nav.share && (!nav.canShare || nav.canShare(shareData))) {
+            await nav.share(shareData);
+            return;
+        }
+    } catch {
+        void 0;
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 export default function ExcelAssistant() {
@@ -335,7 +355,7 @@ export default function ExcelAssistant() {
     const handleDownload = () => {
         if (!modifiedBuffer) return;
         const base = fileName?.replace(/\.xlsx$/i, '') || 'excel';
-        downloadArrayBuffer(`${base}-modified.xlsx`, modifiedBuffer);
+        void downloadArrayBuffer(`${base}-modified.xlsx`, modifiedBuffer);
     };
 
     const handleClear = () => {

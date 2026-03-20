@@ -361,6 +361,7 @@ export default function ShortsStudio() {
     const [sceneImages, setSceneImages] = useState<{ id: number; dataUrl: string }[]>([]);
     const [isGeneratingImages, setIsGeneratingImages] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
     const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
 
     const lastUserText = useMemo(() => {
@@ -420,6 +421,7 @@ export default function ShortsStudio() {
         setStoryboardJson(null);
         setSceneImages([]);
         setVideoUrl(null);
+        setVideoBlob(null);
         clear();
     };
 
@@ -479,6 +481,7 @@ export default function ShortsStudio() {
 
         setIsGeneratingVideo(true);
         setVideoUrl(null);
+        setVideoBlob(null);
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'جاري إنشاء الفيديو (ستوريبورد + صور + صوت + تسجيل 60 ثانية)...' }]);
 
         try {
@@ -527,7 +530,9 @@ export default function ShortsStudio() {
             }
 
             const blob = await createWebmVideo(storyboard, imagesById, audioUrl);
+            if (videoUrl) URL.revokeObjectURL(videoUrl);
             const url = URL.createObjectURL(blob);
+            setVideoBlob(blob);
             setVideoUrl(url);
             const baseMsg = audioUrl
                 ? 'تم إنشاء الفيديو (مع صوت). يمكنك تشغيله وتنزيله.'
@@ -541,12 +546,34 @@ export default function ShortsStudio() {
         }
     };
 
-    const handleDownloadVideo = () => {
-        if (!videoUrl) return;
+    const handleDownloadVideo = async () => {
+        if (!videoBlob) return;
+        const file = new File([videoBlob], 'shorts-video.webm', { type: videoBlob.type || 'video/webm' });
+
+        const nav = navigator as unknown as {
+            canShare?: (data?: unknown) => boolean;
+            share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+        };
+
+        try {
+            const shareData = { files: [file], title: 'Shorts Video' };
+            if (nav.share && (!nav.canShare || nav.canShare(shareData))) {
+                await nav.share(shareData);
+                return;
+            }
+        } catch {
+            void 0;
+        }
+
+        const url = URL.createObjectURL(videoBlob);
         const a = document.createElement('a');
-        a.href = videoUrl;
+        a.href = url;
         a.download = 'shorts-video.webm';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
         a.click();
+        a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 4000);
     };
 
     const customActions = (
@@ -598,14 +625,9 @@ export default function ShortsStudio() {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
                             <div style={{ fontWeight: 700 }}>فيديو الشورتس</div>
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                <a
-                                    className="btn btn-outline"
-                                    href={videoUrl || undefined}
-                                    download="shorts-video.webm"
-                                    style={{ pointerEvents: videoUrl ? 'auto' : 'none', opacity: videoUrl ? 1 : 0.5 }}
-                                >
+                                <button className="btn btn-outline" onClick={() => void handleDownloadVideo()} disabled={!videoBlob}>
                                     <Download size={18} /> تنزيل
-                                </a>
+                                </button>
                                 <button
                                     className="btn btn-outline"
                                     onClick={() => { if (videoUrl) window.open(videoUrl, '_blank'); }}
